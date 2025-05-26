@@ -5,20 +5,16 @@ const app = new Hono<{
 }>();
 
 app.all("*", async (c) => {
-  // eg: /keiko233/nyanpasu-scripts/refs/heads/main/easywarp-provider.js
   const path = c.req.path;
-
-  // eg: https://github.com/keiko233/nyanpasu-scripts
   const allowSourceRepos = c.env.SOURCE_REPOS.split(",");
 
   if (allowSourceRepos.length > 0) {
     const pathParts = path.split("/").filter((part) => part !== "");
 
-    if (pathParts.length < 5) {
+    if (pathParts.length < 3) {
       return c.json(
         {
-          error:
-            "Invalid path format. Expected: /username/repo/refs/heads/branch/file-path",
+          error: "Invalid path format. Expected: /username/repo/...",
         },
         400
       );
@@ -26,9 +22,6 @@ app.all("*", async (c) => {
 
     const username = pathParts[0];
     const repo = pathParts[1];
-    const branch = pathParts[4];
-    const filePath = pathParts.slice(5).join("/");
-
     const repoUrl = `https://github.com/${username}/${repo}`;
 
     if (!allowSourceRepos.includes(repoUrl)) {
@@ -41,7 +34,49 @@ app.all("*", async (c) => {
     }
 
     try {
-      const githubRawUrl = `https://raw.githubusercontent.com/${username}/${repo}/${branch}/${filePath}`;
+      let githubRawUrl: string;
+
+      // Handle different GitHub URL patterns
+      if (
+        pathParts[2] === "refs" &&
+        pathParts[3] === "heads" &&
+        pathParts.length >= 6
+      ) {
+        // Format: /username/repo/refs/heads/branch/file/path
+        const branch = pathParts[4];
+        const filePath = pathParts.slice(5).join("/");
+        githubRawUrl = `https://raw.githubusercontent.com/${username}/${repo}/${branch}/${filePath}`;
+      } else if (pathParts[2] === "release" && pathParts.length >= 4) {
+        // Format: /username/repo/release/file/path
+        const filePath = pathParts.slice(3).join("/");
+        githubRawUrl = `https://github.com/${username}/${repo}/releases/latest/download/${filePath}`;
+      } else if (
+        pathParts[2] === "releases" &&
+        pathParts[3] === "download" &&
+        pathParts.length >= 6
+      ) {
+        // Format: /username/repo/releases/download/tag/file/path
+        const tag = pathParts[4];
+        const filePath = pathParts.slice(5).join("/");
+        githubRawUrl = `https://github.com/${username}/${repo}/releases/download/${tag}/${filePath}`;
+      } else if (pathParts.length >= 4) {
+        // Default format: /username/repo/branch/file/path (assume it's a branch)
+        const branch = pathParts[2];
+        const filePath = pathParts.slice(3).join("/");
+        githubRawUrl = `https://raw.githubusercontent.com/${username}/${repo}/${branch}/${filePath}`;
+      } else {
+        return c.json(
+          {
+            error:
+              "Invalid path format. Supported formats:\n" +
+              "- /username/repo/branch/file/path\n" +
+              "- /username/repo/refs/heads/branch/file/path\n" +
+              "- /username/repo/release/file/path (latest release)\n" +
+              "- /username/repo/releases/download/tag/file/path",
+          },
+          400
+        );
+      }
 
       const response = await fetch(githubRawUrl);
 
@@ -50,8 +85,9 @@ app.all("*", async (c) => {
           {
             error: "Failed to fetch file from repository",
             status: response.status,
+            url: githubRawUrl,
           },
-          500
+          response.status === 404 ? 404 : 500
         );
       }
 

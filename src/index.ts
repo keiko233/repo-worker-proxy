@@ -1,12 +1,22 @@
 import { Hono } from "hono";
 
+const normalizeRepoIdentifier = (value: string) =>
+  value
+    .trim()
+    .replace(/^https?:\/\/github\.com\//, "")
+    .replace(/^github\.com\//, "")
+    .replace(/^\/+|\/+$/g, "")
+    .toLowerCase();
+
 const app = new Hono<{
   Bindings: CloudflareBindings;
 }>();
 
 app.all("*", async (c) => {
   const path = c.req.path;
-  const allowSourceRepos = c.env.SOURCE_REPOS.split(",");
+  const allowSourceRepos = c.env.SOURCE_REPOS.split(",")
+    .map(normalizeRepoIdentifier)
+    .filter((value) => value !== "");
 
   if (allowSourceRepos.length > 0) {
     const pathParts = path.split("/").filter((part) => part !== "");
@@ -16,20 +26,20 @@ app.all("*", async (c) => {
         {
           error: "Invalid path format. Expected: /username/repo/...",
         },
-        400
+        400,
       );
     }
 
     const username = pathParts[0];
     const repo = pathParts[1];
-    const repoUrl = `https://github.com/${username}/${repo}`;
+    const repoSlug = normalizeRepoIdentifier(`${username}/${repo}`);
 
-    if (!allowSourceRepos.includes(repoUrl)) {
+    if (!allowSourceRepos.includes(repoSlug)) {
       return c.json(
         {
           error: "Repository not allowed",
         },
-        403
+        403,
       );
     }
 
@@ -45,11 +55,13 @@ app.all("*", async (c) => {
         // Format: /username/repo/refs/heads/branch/file/path
         const branch = pathParts[4];
         const filePath = pathParts.slice(5).join("/");
-        githubRawUrl = `https://raw.githubusercontent.com/${username}/${repo}/${branch}/${filePath}`;
+        githubRawUrl =
+          `https://raw.githubusercontent.com/${username}/${repo}/${branch}/${filePath}`;
       } else if (pathParts[2] === "release" && pathParts.length >= 4) {
         // Format: /username/repo/release/file/path
         const filePath = pathParts.slice(3).join("/");
-        githubRawUrl = `https://github.com/${username}/${repo}/releases/latest/download/${filePath}`;
+        githubRawUrl =
+          `https://github.com/${username}/${repo}/releases/latest/download/${filePath}`;
       } else if (
         pathParts[2] === "releases" &&
         pathParts[3] === "download" &&
@@ -58,23 +70,24 @@ app.all("*", async (c) => {
         // Format: /username/repo/releases/download/tag/file/path
         const tag = pathParts[4];
         const filePath = pathParts.slice(5).join("/");
-        githubRawUrl = `https://github.com/${username}/${repo}/releases/download/${tag}/${filePath}`;
+        githubRawUrl =
+          `https://github.com/${username}/${repo}/releases/download/${tag}/${filePath}`;
       } else if (pathParts.length >= 4) {
         // Default format: /username/repo/branch/file/path (assume it's a branch)
         const branch = pathParts[2];
         const filePath = pathParts.slice(3).join("/");
-        githubRawUrl = `https://raw.githubusercontent.com/${username}/${repo}/${branch}/${filePath}`;
+        githubRawUrl =
+          `https://raw.githubusercontent.com/${username}/${repo}/${branch}/${filePath}`;
       } else {
         return c.json(
           {
-            error:
-              "Invalid path format. Supported formats:\n" +
+            error: "Invalid path format. Supported formats:\n" +
               "- /username/repo/branch/file/path\n" +
               "- /username/repo/refs/heads/branch/file/path\n" +
               "- /username/repo/release/file/path (latest release)\n" +
               "- /username/repo/releases/download/tag/file/path",
           },
-          400
+          400,
         );
       }
 
@@ -87,7 +100,7 @@ app.all("*", async (c) => {
             status: response.status,
             url: githubRawUrl,
           },
-          response.status === 404 ? 404 : 500
+          response.status === 404 ? 404 : 500,
         );
       }
 
@@ -105,7 +118,7 @@ app.all("*", async (c) => {
           error: "Failed to fetch repository data",
           details: error instanceof Error ? error.message : "Unknown error",
         },
-        500
+        500,
       );
     }
   }
@@ -114,7 +127,7 @@ app.all("*", async (c) => {
     {
       error: "No source repositories configured",
     },
-    500
+    500,
   );
 });
 

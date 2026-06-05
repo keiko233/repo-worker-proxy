@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 
 const normalizeRepoIdentifier = (value: string) =>
   value
@@ -7,6 +8,37 @@ const normalizeRepoIdentifier = (value: string) =>
     .replace(/^github\.com\//, "")
     .replace(/^\/+|\/+$/g, "")
     .toLowerCase();
+
+// Hosts that carry the owner/repo in the first two path segments, so the
+// allowlist can be enforced on a directly-embedded GitHub URL.
+const ALLOWED_PASSTHROUGH_HOSTS = new Set([
+  "github.com",
+  "raw.githubusercontent.com",
+]);
+
+const proxyResponse = async (c: Context, targetUrl: string) => {
+  const response = await fetch(targetUrl);
+
+  if (!response.ok) {
+    return c.json(
+      {
+        error: "Failed to fetch file from repository",
+        status: response.status,
+        url: targetUrl,
+      },
+      response.status === 404 ? 404 : 500,
+    );
+  }
+
+  const data = await response.arrayBuffer();
+
+  return new Response(data, {
+    headers: {
+      "Content-Type": response.headers.get("Content-Type") || "text/plain",
+      "Cache-Control": "public, max-age=300",
+    },
+  });
+};
 
 const app = new Hono<{
   Bindings: CloudflareBindings;
@@ -19,6 +51,48 @@ app.all("*", async (c) => {
     .filter((value) => value !== "");
 
   if (allowSourceRepos.length > 0) {
+    // Format: /<full github url>
+    // e.g. /https://github.com/owner/repo/releases/download/tag/file
+    // The leading slash is dropped and the URL pathname may collapse the
+    // "//" in the scheme, so allow any number of slashes after "https:".
+    const embeddedMatch = (c.req.path.slice(1) + (new URL(c.req.url).search))
+      .match(/^(https?):\/*(.+)$/i);
+
+    if (embeddedMatch) {
+      let targetUrl: URL;
+      try {
+        targetUrl = new URL(`${embeddedMatch[1].toLowerCase()}://${embeddedMatch[2]}`);
+      } catch {
+        return c.json({ error: "Invalid embedded URL" }, 400);
+      }
+
+      if (!ALLOWED_PASSTHROUGH_HOSTS.has(targetUrl.hostname.toLowerCase())) {
+        return c.json({ error: "Host not allowed" }, 403);
+      }
+
+      const segments = targetUrl.pathname.split("/").filter((part) => part !== "");
+      if (segments.length < 2) {
+        return c.json({ error: "Invalid path format. Expected: /<github url>" }, 400);
+      }
+
+      const repoSlug = normalizeRepoIdentifier(`${segments[0]}/${segments[1]}`);
+      if (!allowSourceRepos.includes(repoSlug)) {
+        return c.json({ error: "Repository not allowed" }, 403);
+      }
+
+      try {
+        return await proxyResponse(c, targetUrl.toString());
+      } catch (error) {
+        return c.json(
+          {
+            error: "Failed to fetch repository data",
+            details: error instanceof Error ? error.message : "Unknown error",
+          },
+          500,
+        );
+      }
+    }
+
     const pathParts = path.split("/").filter((part) => part !== "");
 
     if (pathParts.length < 3) {
@@ -91,27 +165,7 @@ app.all("*", async (c) => {
         );
       }
 
-      const response = await fetch(githubRawUrl);
-
-      if (!response.ok) {
-        return c.json(
-          {
-            error: "Failed to fetch file from repository",
-            status: response.status,
-            url: githubRawUrl,
-          },
-          response.status === 404 ? 404 : 500,
-        );
-      }
-
-      const data = await response.text();
-
-      return new Response(data, {
-        headers: {
-          "Content-Type": response.headers.get("Content-Type") || "text/plain",
-          "Cache-Control": "public, max-age=300",
-        },
-      });
+      return await proxyResponse(c, githubRawUrl);
     } catch (error) {
       return c.json(
         {

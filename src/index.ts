@@ -16,10 +16,62 @@ const ALLOWED_PASSTHROUGH_HOSTS = new Set([
   "raw.githubusercontent.com",
 ]);
 
-const proxyResponse = async (c: Context, targetUrl: string) => {
-  const response = await fetch(targetUrl);
+const REQUEST_HEADERS_TO_FORWARD = [
+  "accept",
+  "if-match",
+  "if-none-match",
+  "if-modified-since",
+  "if-unmodified-since",
+  "if-range",
+  "range",
+];
 
-  if (!response.ok) {
+const RESPONSE_HEADERS_TO_DROP = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+const getUpstreamHeaders = (request: Request) => {
+  const headers = new Headers();
+
+  for (const name of REQUEST_HEADERS_TO_FORWARD) {
+    const value = request.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+
+  return headers;
+};
+
+const getResponseHeaders = (response: Response) => {
+  const headers = new Headers(response.headers);
+
+  for (const name of RESPONSE_HEADERS_TO_DROP) {
+    headers.delete(name);
+  }
+
+  if (!headers.has("cache-control")) {
+    headers.set("Cache-Control", "public, max-age=300");
+  }
+
+  return headers;
+};
+
+const proxyResponse = async (c: Context, targetUrl: string) => {
+  const response = await fetch(targetUrl, {
+    headers: getUpstreamHeaders(c.req.raw),
+    method: c.req.method === "HEAD" ? "HEAD" : "GET",
+    redirect: "follow",
+  });
+
+  if (!response.ok && response.status !== 304) {
     return c.json(
       {
         error: "Failed to fetch file from repository",
@@ -30,13 +82,10 @@ const proxyResponse = async (c: Context, targetUrl: string) => {
     );
   }
 
-  const data = await response.arrayBuffer();
-
-  return new Response(data, {
-    headers: {
-      "Content-Type": response.headers.get("Content-Type") || "text/plain",
-      "Cache-Control": "public, max-age=300",
-    },
+  return new Response(response.body, {
+    headers: getResponseHeaders(response),
+    status: response.status,
+    statusText: response.statusText,
   });
 };
 

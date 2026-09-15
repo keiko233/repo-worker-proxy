@@ -10,7 +10,7 @@ importers:
     dependencies:
       hono:
         specifier: ^4.7.10
-        version: 4.13.5
+        version: 4.13.8
     devDependencies:
       wrangler:
         specifier: ^4.16.1
@@ -427,8 +427,8 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  hono@4.13.5:
-    resolution: {integrity: sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw==}
+  hono@4.13.8:
+    resolution: {integrity: sha512-/Gng7NfoykZl2pjukW5Z6+8Yxm3BPRf86GTbQnt0SbySkvax4fyL4H3HhY1cCpBGmiW9XDRFzRV+CXK2W8QudQ==}
     engines: {node: '>=16.9.0'}
 
   kleur@4.1.5:
@@ -775,7 +775,7 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  hono@4.13.5: {}
+  hono@4.13.8: {}
 
   kleur@4.1.5: {}
 

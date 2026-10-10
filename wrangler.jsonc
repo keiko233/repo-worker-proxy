@@ -3,6 +3,7 @@
   "name": "repo-worker-proxy",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-25",
+  "keep_vars": true,
   "assets": {
     "binding": "ASSETS",
     "directory": "./public"
